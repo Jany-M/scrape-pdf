@@ -14,18 +14,78 @@ type ColorScheme = undefined | null | "light" | "dark" | "no-preference"
 
 export const OUTPUT_DIR = "./output";
 
+const handleCookieDialog = async (page: Page) => {
+    // Common selectors for cookie acceptance buttons/elements
+    const cookieSelectors = [
+        // Generic accept buttons
+        'button[id*="accept" i]',
+        'button[class*="accept" i]',
+        'a[id*="accept" i]',
+        'a[class*="accept" i]',
+        // Common cookie banner buttons
+        '[aria-label*="accept" i]',
+        '[data-testid*="accept" i]',
+        // Common text-based buttons
+        'button:has-text("Accept")',
+        'button:has-text("Accept all")',
+        'button:has-text("I accept")',
+        'button:has-text("Allow all")',
+        'button:has-text("Allow cookies")',
+        // Common elements with German text
+        'button:has-text("Akzeptieren")',
+        'button:has-text("Alle akzeptieren")',
+        // Common elements with French text
+        'button:has-text("Accepter")',
+        'button:has-text("J\'accepte")',
+    ];
+
+    for (const selector of cookieSelectors) {
+        try {
+            const button = await page.$(selector);
+            if (button) {
+                await button.click();
+                // Wait a bit for any animations/transitions
+                await page.waitForTimeout(500);
+                return true;
+            }
+        } catch (e) {
+            // Ignore errors and continue trying other selectors
+        }
+    }
+    return false;
+};
+
 const visitPage = async (rootUrl: string, browser: Browser, url: string, verbose: boolean, dryRun: boolean, withHeader: boolean, media: string, colorScheme: string) => {
     const page = await browser.newPage();
+
+    if (verbose) {
+        console.log(chalk.yellow(`Navigating to ${url}`));
+    }
 
     // Some websites will load initial content super quick but then take a while on CSS and assets, so lets wait until network idle
     try {
         await page.goto(url, { waitUntil: 'networkidle' });
+        
+        if (verbose) {
+            console.log(chalk.yellow(`Page loaded, checking for cookie dialog`));
+        }
+
+        // Try to handle any cookie dialog
+        const handled = await handleCookieDialog(page);
+        if (handled) {
+            if (verbose) {
+                console.log(chalk.cyan(`Handled cookie dialog for ${url}`));
+            }
+        } else if (verbose) {
+            console.log(chalk.yellow(`No cookie dialog found or couldn't handle it for ${url}`));
+        }
+
     } catch (e) {
         console.log(chalk.red(`Error navigating to ${url}:\n${e}`));
         return [];
     }
 
-    const newUrls = await getCleanUrlsFromPage(rootUrl, page);
+    const newUrls = await getCleanUrlsFromPage(rootUrl, page, verbose);
 
     if (!dryRun) {
         await savePdfFile(page, url, verbose, withHeader, media, colorScheme);
@@ -38,8 +98,16 @@ const visitPage = async (rootUrl: string, browser: Browser, url: string, verbose
 }
 
 const IGNORE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".svg", ".css", ".js", ".ico", ".xml", ".json", ".txt", ".md", ".pdf", ".zip"];
-const getCleanUrlsFromPage = async (rootUrl: string, page: Page) => {
+const getCleanUrlsFromPage = async (rootUrl: string, page: Page, verbose: boolean) => {
+    if (verbose) {
+        console.log(chalk.yellow(`Extracting links from page: ${page.url()}`));
+    }
+
     const allHrefElements = await page.locator('[href]').all();
+    if (verbose) {
+        console.log(chalk.yellow(`Found ${allHrefElements.length} total links`));
+    }
+
     const hrefs: string[] = [];
     await Promise.all(
         allHrefElements.map(async locator => {
@@ -48,42 +116,75 @@ const getCleanUrlsFromPage = async (rootUrl: string, page: Page) => {
         })
     );
 
+    if (verbose) {
+        console.log(chalk.yellow(`Processed ${hrefs.length} valid href attributes`));
+    }
+
     // Clean up URLs with inconsistent slashes
-    // TODO: Refactor URL parsing and filtering to more easily handle file extensions, external URLs, etc.
-    const baseUrl = new URL(rootUrl).origin;
-    return hrefs.reduce((acc: string[], href) => {
+    const baseUrl = new URL(rootUrl);
+    const pageUrl = new URL(page.url());
+    const cleanUrls = hrefs.reduce((acc: string[], href) => {
         let url: string;
-        if (href.startsWith("/")) {
-            url = new URL(href.trim(), baseUrl).href
-        } else if (href.startsWith("http")) {
-            url = href.trim();
-        } else {
-            return acc;
-        }
+        try {
+            // Handle different URL formats
+            if (href.startsWith("http")) {
+                url = href.trim();
+            } else if (href.startsWith("/")) {
+                // Absolute path
+                url = new URL(href.trim(), baseUrl.origin).href;
+            } else if (href && !href.startsWith("#") && !href.startsWith("mailto:")) {
+                // Relative path - combine with current page path
+                const currentPath = pageUrl.pathname;
+                const parentPath = currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
+                url = new URL(href.trim(), `${baseUrl.origin}${parentPath}`).href;
+            } else {
+                if (verbose) {
+                    console.log(chalk.gray(`Skipping invalid URL format: ${href}`));
+                }
+                return acc;
+            }
 
-        // Remove empty URLs
-        if (url === "" || url === "/") {
-            return acc;
-        }
+            // Remove empty URLs and self-references
+            if (url === "" || url === "/" || url === baseUrl.href || url === baseUrl.origin + "/") {
+                if (verbose) {
+                    console.log(chalk.gray(`Skipping empty URL: ${url}`));
+                }
+                return acc;
+            }
 
-        // Remove URLs that aren't HTML pages
-        if (IGNORE_EXTENSIONS.includes(path.extname(url))) {
-            return acc;
-        }
-        // const validExtensions = [".html", ".htm"];
-        // for (const extension of validExtensions) {
-        //     if (!url.endsWith(extension)) {
-        //         console.log(`Ignoring URL because it's an invalid extension: ${url}`);
-        //         return false;
-        //     }
-        // }
+            // Remove URLs that aren't HTML pages
+            if (IGNORE_EXTENSIONS.includes(path.extname(url))) {
+                if (verbose) {
+                    console.log(chalk.gray(`Skipping non-HTML extension: ${url}`));
+                }
+                return acc;
+            }
 
-        // Only include URLs that are on the same domain
-        if (!url.startsWith("http") || url.startsWith(rootUrl)) {
-            acc.push(url);
+            // Only include URLs that are on the same domain
+            const urlObj = new URL(url);
+            if (urlObj.origin === baseUrl.origin) {
+                if (verbose) {
+                    console.log(chalk.blue(`Found valid URL: ${url}`));
+                }
+                acc.push(url);
+            } else {
+                if (verbose) {
+                    console.log(chalk.gray(`Skipping external URL: ${url}`));
+                }
+            }
+        } catch (e) {
+            if (verbose) {
+                console.log(chalk.red(`Error processing URL ${href}: ${e}`));
+            }
         }
         return acc;
     }, []);
+
+    if (verbose) {
+        console.log(chalk.green(`Found ${cleanUrls.length} valid internal URLs to process`));
+    }
+
+    return cleanUrls;
 }
 
 const savePdfFile = async (page: Page, url: string, verbose: boolean, withHeader: boolean, media: string, colorScheme: string) => {
