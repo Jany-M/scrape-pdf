@@ -12,6 +12,7 @@ export interface ICLIArguments {
     withHeader: boolean;
     media: string;
     colorScheme: string;
+    skipExist: boolean;
 }
 
 (async () => {
@@ -50,6 +51,12 @@ export interface ICLIArguments {
                 alias: 'c',
                 description: "Emulate the given color scheme (if the site supports color schemes)",
                 defaultValue: 'no-preference',
+            },
+            skipExist: {
+                type: Boolean,
+                alias: 's',
+                description: "Skip PDF conversion if output file already exists",
+                defaultValue: false,
             }
         });
 

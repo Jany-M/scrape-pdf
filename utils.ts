@@ -55,7 +55,7 @@ const handleCookieDialog = async (page: Page) => {
     return false;
 };
 
-const visitPage = async (rootUrl: string, browser: Browser, url: string, verbose: boolean, dryRun: boolean, withHeader: boolean, media: string, colorScheme: string) => {
+const visitPage = async (rootUrl: string, browser: Browser, url: string, verbose: boolean, dryRun: boolean, withHeader: boolean, media: string, colorScheme: string, skipExist: boolean) => {
     const page = await browser.newPage();
 
     if (verbose) {
@@ -88,7 +88,7 @@ const visitPage = async (rootUrl: string, browser: Browser, url: string, verbose
     const newUrls = await getCleanUrlsFromPage(rootUrl, page, verbose);
 
     if (!dryRun) {
-        await savePdfFile(page, url, verbose, withHeader, media, colorScheme);
+        await savePdfFile(page, url, verbose, withHeader, media, colorScheme, skipExist);
     }
 
     await page.close();
@@ -187,7 +187,7 @@ const getCleanUrlsFromPage = async (rootUrl: string, page: Page, verbose: boolea
     return cleanUrls;
 }
 
-const savePdfFile = async (page: Page, url: string, verbose: boolean, withHeader: boolean, media: string, colorScheme: string) => {
+const savePdfFile = async (page: Page, url: string, verbose: boolean, withHeader: boolean, media: string, colorScheme: string, skipExist: boolean) => {
     const lastSlashIndex = nthIndexOf(url, "/", 3);
 
     let pageTitle = await page.title()
@@ -199,8 +199,20 @@ const savePdfFile = async (page: Page, url: string, verbose: boolean, withHeader
     safeUrl = safeUrl.replace(/_{2,}/g, "_");
 
     const fileName = `${pageTitle}_${safeUrl}.pdf`;
-
     const pdfPath = `${OUTPUT_DIR}/${fileName}`;
+
+    // Check if file exists and skip if requested
+    if (skipExist) {
+        try {
+            await fs.access(pdfPath);
+            if (verbose) {
+                console.log(chalk.yellow(`Skipping existing PDF: ${pdfPath}`));
+            }
+            return;
+        } catch {
+            // File doesn't exist, continue with PDF generation
+        }
+    }
 
     // https://playwright.dev/docs/api/class-page#page-emulate-media
     await page.emulateMedia({ media: media as Media, colorScheme: colorScheme as ColorScheme });
@@ -259,7 +271,7 @@ export const processUrl = async (
         console.log(chalk.green(`URL: ${url}`));
     }
     visitedUrls.add(url);
-    const newUrls = await visitPage(rootUrl, browser, url, args.verbose, args.dryRun, args.withHeader, args.media, args.colorScheme);
+    const newUrls = await visitPage(rootUrl, browser, url, args.verbose, args.dryRun, args.withHeader, args.media, args.colorScheme, args.skipExist);
     for (const nextUrl of newUrls) {
         if (!visitedUrls.has(nextUrl)) {
             processQueue[nextUrl] = limit(() => processUrl(browser, rootUrl, nextUrl, visitedUrls, processQueue, args, limit));
