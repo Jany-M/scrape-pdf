@@ -13,6 +13,7 @@ export interface ICLIArguments {
     media: string;
     colorScheme: string;
     skipExist: boolean;
+    exclude?: string[];
 }
 
 (async () => {
@@ -57,6 +58,14 @@ export interface ICLIArguments {
                 alias: 's',
                 description: "Skip PDF conversion if output file already exists",
                 defaultValue: false,
+            },
+            exclude: {
+                type: String,
+                alias: 'x',
+                description: "Exclude URLs containing this substring (can be used multiple times)",
+                multiple: true,
+                optional: true,
+                defaultValue: [],
             }
         });
 

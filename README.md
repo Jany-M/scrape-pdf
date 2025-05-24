@@ -17,6 +17,18 @@ You'll see some console output, and then should have an `output` directory full 
 | `--withHeader` | `-h` | Whether or not you want PDFs with generated headers (and footers) (default false) |
 | `--dryRun` | `-d` | Perform the web crawl without creating PDFs (default false) |
 | `--verbose` | `-v` | Adds additional logging (default false) |
+| `--exclude` | `-x` | exclude URLs containing specific substrings (like /ja/) |
+
+### Fork Additions 
+
+[https://github.com/Jany-M/scrape-pdf](https://github.com/Jany-M/scrape-pdf)
+
+You can now exclude URLs containing specific substrings (like /ja/) by using the new --exclude or -x parameter.
+
+For example:
+
+`pnpm run scrape https://example.com -x /ja/ -x /fr/`
+
 
 # TODO
 

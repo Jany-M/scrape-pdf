@@ -55,7 +55,7 @@ const handleCookieDialog = async (page: Page) => {
     return false;
 };
 
-const visitPage = async (rootUrl: string, browser: Browser, url: string, verbose: boolean, dryRun: boolean, withHeader: boolean, media: string, colorScheme: string, skipExist: boolean) => {
+const visitPage = async (rootUrl: string, browser: Browser, url: string, verbose: boolean, dryRun: boolean, withHeader: boolean, media: string, colorScheme: string, skipExist: boolean, exclude?: string[]) => {
     const page = await browser.newPage();
 
     if (verbose) {
@@ -85,7 +85,7 @@ const visitPage = async (rootUrl: string, browser: Browser, url: string, verbose
         return [];
     }
 
-    const newUrls = await getCleanUrlsFromPage(rootUrl, page, verbose);
+    const newUrls = await getCleanUrlsFromPage(rootUrl, page, verbose, exclude);
 
     if (!dryRun) {
         await savePdfFile(page, url, verbose, withHeader, media, colorScheme, skipExist);
@@ -98,7 +98,7 @@ const visitPage = async (rootUrl: string, browser: Browser, url: string, verbose
 }
 
 const IGNORE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".svg", ".css", ".js", ".ico", ".xml", ".json", ".txt", ".md", ".pdf", ".zip"];
-const getCleanUrlsFromPage = async (rootUrl: string, page: Page, verbose: boolean) => {
+const getCleanUrlsFromPage = async (rootUrl: string, page: Page, verbose: boolean, exclude?: string[]) => {
     if (verbose) {
         console.log(chalk.yellow(`Extracting links from page: ${page.url()}`));
     }
@@ -163,6 +163,13 @@ const getCleanUrlsFromPage = async (rootUrl: string, page: Page, verbose: boolea
             // Only include URLs that are on the same domain
             const urlObj = new URL(url);
             if (urlObj.origin === baseUrl.origin) {
+                // Exclude URLs containing any of the exclude substrings
+                if (exclude && exclude.some(substr => url.includes(substr))) {
+                    if (verbose) {
+                        console.log(chalk.gray(`Excluding URL due to match: ${url}`));
+                    }
+                    return acc;
+                }
                 if (verbose) {
                     console.log(chalk.blue(`Found valid URL: ${url}`));
                 }
@@ -271,7 +278,7 @@ export const processUrl = async (
         console.log(chalk.green(`URL: ${url}`));
     }
     visitedUrls.add(url);
-    const newUrls = await visitPage(rootUrl, browser, url, args.verbose, args.dryRun, args.withHeader, args.media, args.colorScheme, args.skipExist);
+    const newUrls = await visitPage(rootUrl, browser, url, args.verbose, args.dryRun, args.withHeader, args.media, args.colorScheme, args.skipExist, args.exclude);
     for (const nextUrl of newUrls) {
         if (!visitedUrls.has(nextUrl)) {
             processQueue[nextUrl] = limit(() => processUrl(browser, rootUrl, nextUrl, visitedUrls, processQueue, args, limit));
